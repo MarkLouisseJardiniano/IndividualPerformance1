@@ -4,7 +4,6 @@ const mongoose = require('mongoose');
 
 const PORT = process.env.PORT || 3000;
 
-const courses = require('./courses.json');
 // Initialize Express app
 const app = express();
 
@@ -13,49 +12,86 @@ mongoose.connect('mongodb://localhost:27017/mongo-test', {
     useNewUrlParser: true,
     useUnifiedTopology: true
 });
-//Middleware
+
+
+const courseSchema = new mongoose.Schema({
+    code: String,
+    description: String,
+    units: Number,
+    tags: [String]
+});
+
+
+const Course = mongoose.model('Course', courseSchema);
+
+// Middleware
 app.use(express.json());
 
-// Define the route to get all courses
-app.get('/courses', (req, res) => {
-    if (req.query.sortBy && req.query.sortBy !== 'description') {
-        return res.status(400).send('Invalid sortBy parameter the value only allowed is description');
-    }
-    // Concatenate all courses from all years into a single array
-    const allSubjects = [].concat(...courses.map(years => Object.values(years)).flat());
+app.get('/courses', async (req, res) => {
+    try {
+        // Retrieve all courses from the database
+        const allCourses = await Course.find();
 
-    // Sort courses by their descriptions if sortBy is provided and valid
-    if (req.query.sortBy) {
-        allSubjects.sort((a, b) => {
-            if (a.description < b.description) return -1;
-            if (a.description > b.description) return 1;
-            return 0;
-        });
+        // Combine all courses into a single array
+        const CoursesArray = allCourses.reduce((acc, curr) => {
+            return acc.concat(Object.values(curr.toObject()).filter(Array.isArray).flat());
+        }, []);
+
+        // Sort the combined array alphabetically by description
+        CoursesArray.sort((a, b) => a.description.localeCompare(b.description));
+
+        // Send the sorted courses in the response
+        res.send(CoursesArray);
+    } catch (err) {
+        res.status(500).send(err.message);
     }
-    // Send subjects in response
-    res.send(allSubjects);
 });
 
-app.get('/courses/:query', (req, res) => {
-    const query = req.params.query;
-    // Flatten the courses array to get all subjects
-    const allSubjects = [].concat(...courses.map(years => 
-        Object.values(years)).flat());
-    
-    // Filter courses based on the query
-    const filteredCourses = allSubjects.filter(course => 
-        course.tags.includes(query) || 
-        course.description.includes(query) || 
-        course.units === parseInt(query));
 
-    // Send the filtered courses in the response
-    if (!filteredCourses.length){
-        return res.status(404).send('No courses found');
+// Route to get courses by query using BSIS or BSIT
+app.get('/courses/:query', async (req, res) => {
+    const query = req.params.query.toUpperCase();
+
+    // Validate the query parameter
+    if (query !== 'BSIS' && query !== 'BSIT') {
+        return res.status(400).send('Invalid Course. Please provide BSIS or BSIT.');
     }
-    res.send(filteredCourses);
+
+    try {
+        const allCourses = await Course.find();
+
+        // Combine all courses into a single array
+        const coursesArray = allCourses.reduce((acc, curr) => {
+            return acc.concat(Object.values(curr.toObject()).filter(Array.isArray).flat());
+        }, []);
+
+        // To filter courses based on the query
+        const filteredCourses = coursesArray.filter(course =>
+            course.tags.includes(query) &&
+            (course.tags.includes('BSIS') || course.tags.includes('BSIT'))
+        );
+
+        // For Extracting the name and specialization(description) of each course
+        const coursesExtract = filteredCourses.map(course => ({
+            name: course.code,
+            specialization: course.description
+        }));
+
+        res.send(coursesExtract);
+    } catch (err) {
+        res.status(500).send(err.message);
+    }
 });
+
+
+
 
 // Start server
-app.listen(PORT, () => {
-console.log(`Server is running on port ${PORT}`);
+app.listen(PORT, async () => {
+    try {
+        console.log(`Server is running on port ${PORT}`);
+    } catch (err) {
+        console.error('Error populating initial data:', err);
+    }
 });
+
